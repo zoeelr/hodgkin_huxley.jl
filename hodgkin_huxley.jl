@@ -9,26 +9,13 @@ Gk = 0.36
 Gl = 0.003
 Cm = 0.01
  
- function hodgkin_huxley(plotting::Bool, method)
-    time_span = (0.0, 500.0)
-
-    current_injected₀ = 0.06
-
-    time₁ = 20
-    duration₁ = 500
-    current_injected₁ = 0.0
-
-    time₂ = 20
-    duration₂ = 500
-    current_injected₂ = 0.0
+ function hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString} = false)
 
     voltage₀ = -65
     n_gate₀ = 0.3
     m_gate₀ = 0.1
     h_gate₀ = 0.6
 
-    relative_tolerance = 1e-11
-    absolute_tolerance = 1e-11
     maximum_time_step = max(duration₁, duration₂)/2
 
     u₀ = [voltage₀, n_gate₀, m_gate₀, h_gate₀]
@@ -49,15 +36,30 @@ Cm = 0.01
     current_K = Gk .* n_gate .^4 .* (Ek .- voltage);
     current_l = Gl .* (El .- voltage);
 
-    print(size(current_Na))
-    print(size(current_K))
-    print(size(current_l))
+    if show_plot || (save_figure != false)
+        plot_voltage_v_time = plot(solution, plotdensity=10000, idxs=[1], title="Voltage", label="voltage", xlabel="time (ms)", ylabel="(mV)"; dpi=600)
+        plot_gates_v_time = plot(solution, plotdensity=10000, idxs=[2, 3, 4], title="Current gating variables", label=["n" "m" "h"], xlabel="time (ms)"; dpi=600)
+        plot_current_v_time = plot(time, plotdensity=10000, [current_Na, current_K, current_l], title="Currents", label=["Na" "K" "leak"], xlabel="time (ms)", ylabel="(mA)"; dpi=600)
 
-    plot_voltage_v_time = plot(solution, plotdensity=10000, idxs=[1])
-    plot_gates_v_time = plot(solution, plotdensity=10000, idxs=[2, 3, 4])
-    plot_current_v_time = plot(time, plotdensity=10000, [current_Na, current_K, current_l])
+        full_plot = plot(plot_voltage_v_time, plot_gates_v_time, plot_current_v_time, layout=(3, 1); dpi = 600)
 
-    plot(plot_voltage_v_time, plot_gates_v_time, plot_current_v_time, layout=(3, 1))
+
+        if (save_figure != false)
+            savefig(plot_voltage_v_time, save_figure*"_volt")
+            savefig(plot_gates_v_time, save_figure*"_vars")
+            savefig(plot_current_v_time, save_figure*"_currs")
+            savefig(full_plot, save_figure*"_full")
+        end
+
+        if show_plot
+            display(full_plot)
+        end
+
+        return solution, full_plot
+    end
+
+    return solution
+    
 end
 
 function hodgkin_huxley_rhs(u, p, time)
@@ -93,8 +95,22 @@ function hodgkin_huxley_rhs(u, p, time)
     return u_prime
 end
 
-function hodgkin_huxley()
-    hodgkin_huxley(true, QNDF())
+function hodgkin_huxley(;method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
+    return hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
 end
 
-hodgkin_huxley()
+hodgkin_huxley(
+    method = Rodas4(),
+    time_span = (0.0, 500.0),
+    current_injected₀ = 0.06,
+    time₁ = 20.0,
+    duration₁ = 500.0,
+    current_injected₁ = 0.0,
+    time₂ = 20.0,
+    duration₂ = 500.0,
+    current_injected₂ = 0.0,
+    relative_tolerance = 1e-11,
+    absolute_tolerance = 1e-11,
+    show_plot = true,
+    save_figure = false # or filename of output image
+    )

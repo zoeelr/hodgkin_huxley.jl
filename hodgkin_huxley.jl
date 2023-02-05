@@ -1,6 +1,6 @@
 module HodgkinHuxley
 
-    export hodgkin_huxley
+    export solve_hodgkin_huxley
 
     using OrdinaryDiffEq
     using Plots
@@ -13,7 +13,7 @@ module HodgkinHuxley
     Gl = 0.003
     Cm = 0.01
  
-    function hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString} = false)
+    function solve_hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString} = false)
 
         voltage₀ = -65
         n_gate₀ = 0.3
@@ -60,11 +60,9 @@ module HodgkinHuxley
             if show_plot
                 display(full_plot)
             end
-
-            return solution, spike_times, periods
         end
 
-        return solution, spike_times, periods
+        return (solution, spike_times, periods)
         
     end
 
@@ -120,8 +118,8 @@ module HodgkinHuxley
         return u_prime
     end
 
-    function hodgkin_huxley(;method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
-        return hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
+    function solve_hodgkin_huxley(;method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
+        return solve_hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
     end
 
 end

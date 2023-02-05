@@ -36,6 +36,8 @@ module HodgkinHuxley
         m_gate = solution[3, :]
         h_gate = solution[4, :]
 
+        spike_times, periods = calculate_periods(time, voltage)
+
         current_Na = Gna .* m_gate .^3 .* h_gate .* (Ena .- voltage);
         current_K = Gk .* n_gate .^4 .* (Ek .- voltage);
         current_l = Gl .* (El .- voltage);
@@ -59,11 +61,30 @@ module HodgkinHuxley
                 display(full_plot)
             end
 
-            return solution, full_plot
+            return solution, spike_times, periods
         end
 
-        return solution
+        return solution, spike_times, periods
         
+    end
+
+    function calculate_periods(time, voltage)
+        mask_voltage_sign_changes = (voltage[1:end-1] .* voltage[2:end]) .< 0
+    
+        mask_voltage_negative = voltage[1:end-1] .< 0
+    
+        mask_spikes = (mask_voltage_sign_changes .== 1) .& (mask_voltage_negative .== 1)
+    
+        spike_times = (time[1:end-1])[mask_spikes]
+    
+        if length(mask_spikes) < 2
+            @warn "Less than 2 spikes, no periods calculated"
+            return spike_times, false
+        end
+    
+        periods = spike_times[2:end] .- spike_times[1:end-1]
+    
+        return spike_times, periods
     end
 
     function hodgkin_huxley_rhs(u, p, time)

@@ -77,7 +77,7 @@ module HodgkinHuxley
     
         if length(mask_spikes) < 2
             @warn "Less than 2 spikes, no periods calculated"
-            return spike_times, false
+            return spike_times, []
         end
     
         periods = spike_times[2:end] .- spike_times[1:end-1]

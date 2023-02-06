@@ -5,26 +5,30 @@ module HodgkinHuxley
     using OrdinaryDiffEq
     using Plots
 
-    Ena = 50
-    Ek = -77
+    Ena = 50.0
+    Ek = -77.0
     El = -54.387
+    ECa = 120.0
     Gna = 1.20
     Gk = 0.36
     Gl = 0.003
     Cm = 0.01
+    GCaT = 0.045
  
-    function solve_hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString} = false)
+    function solve_hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, current_modulating, interval_modulating, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString} = false)
 
         voltage₀ = -65
         n_gate₀ = 0.3
         m_gate₀ = 0.1
         h_gate₀ = 0.6
+        M_gate₀ = 0.2
+        H_gate₀ = 0.1
 
         maximum_time_step = max(duration₁, duration₂)/2
 
-        u₀ = [voltage₀, n_gate₀, m_gate₀, h_gate₀]
+        u₀ = [voltage₀, n_gate₀, m_gate₀, h_gate₀, M_gate₀, H_gate₀]
 
-        p = (current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂)
+        p = (current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, current_modulating, interval_modulating)
 
         ode_problem = ODEProblem(hodgkin_huxley_rhs, u₀, time_span, p)
 
@@ -35,17 +39,26 @@ module HodgkinHuxley
         n_gate = solution[2, :]
         m_gate = solution[3, :]
         h_gate = solution[4, :]
+        M_gate = solution[5, :]
+        H_gate = solution[6, :]
 
         spike_times, periods = calculate_periods(time, voltage)
 
-        current_Na = Gna .* m_gate .^3 .* h_gate .* (Ena .- voltage);
-        current_K = Gk .* n_gate .^4 .* (Ek .- voltage);
-        current_l = Gl .* (El .- voltage);
+        current_Na = Gna .* m_gate .^3 .* h_gate .* (Ena .- voltage)
+        current_K = Gk .* n_gate .^4 .* (Ek .- voltage)
+        current_l = Gl .* (El .- voltage)
+        current_CaT = GCaT .* M_gate .^ 2 .* H_gate .* (voltage .- ECa)
+
+        current_injected_base = current_injected₀ .+ current_injected₁ .* (time .>= time₁) .* (time .<= time₁ .+ duration₁) .+ current_injected₂ .* (time .>= time₂) .* (time .<= time₂ .+ duration₂)
+
+        current_injected = current_injected_base .+ current_modulating .* sin.(2 .* pi .* time ./ interval_modulating)
+
+        firing_rate = calculate_firing_rate(time, spike_times)
 
         if show_plot || (save_figure != false)
             plot_voltage_v_time = plot(solution, plotdensity=10000, idxs=[1], title="Voltage", label="voltage", xlabel="time (ms)", ylabel="(mV)"; dpi=600)
-            plot_gates_v_time = plot(solution, plotdensity=10000, idxs=[2, 3, 4], title="Current gating variables", label=["n" "m" "h"], xlabel="time (ms)"; dpi=600)
-            plot_current_v_time = plot(time, plotdensity=10000, [current_Na, current_K, current_l], title="Currents", label=["Na" "K" "leak"], xlabel="time (ms)", ylabel="(mA)"; dpi=600)
+            plot_gates_v_time = plot(solution, plotdensity=10000, idxs=[2, 3, 4, 5, 6], title="Current gating variables", label=["n" "m" "h" "M" "H"], xlabel="time (ms)"; dpi=600)
+            plot_current_v_time = plot(time, plotdensity=10000, [current_Na, current_K, current_l, current_CaT], title="Currents", label=["Na" "K" "leak" "CaT"], xlabel="time (ms)", ylabel="(mA)"; dpi=600)
 
             full_plot = plot(plot_voltage_v_time, plot_gates_v_time, plot_current_v_time, layout=(3, 1); dpi = 600)
 
@@ -62,7 +75,7 @@ module HodgkinHuxley
             end
         end
 
-        return (solution, spike_times, periods)
+        return (solution, spike_times, periods, firing_rate)
         
     end
 
@@ -85,12 +98,55 @@ module HodgkinHuxley
         return spike_times, periods
     end
 
+    function calculate_firing_rate(time, spike_times)
+        if length(spike_times) < 2
+            @warn "Less than 2 spikes, no periods calculated"
+            return nothing
+        end
+        modified_spike_times = copy(spike_times)
+
+        append!(modified_spike_times, time[end] + 1)
+    
+        next_spike = zeros((length(spike_times), length(time)))
+        most_recent_spike = zeros((length(spike_times), length(time)))
+        for spike_index in eachindex(spike_times)
+            most_recent_spike[spike_index, :] = modified_spike_times[spike_index] .* ( (time .>= modified_spike_times[spike_index]) .&& (time .< modified_spike_times[spike_index + 1]) )
+        end
+        extrapolated_next_spike = 2 * spike_times[end] - spike_times[end - 1]
+        modified_spike_times[end] = extrapolated_next_spike
+        for spike_index in eachindex(spike_times)
+            next_spike[spike_index, :] = modified_spike_times[spike_index + 1] .* ( (time .>= modified_spike_times[spike_index]) .&& (time .< modified_spike_times[spike_index + 1]) )
+        end
+    
+        most_recent_spike[end] = most_recent_spike[end - 1]
+        next_spike[end] = extrapolated_next_spike
+    
+        most_recent_spike = sum(most_recent_spike, dims=1)
+        next_spike = sum(next_spike, dims=1)
+    
+        for index in eachindex(next_spike)
+            if next_spike[index] != 0
+                break
+            end
+            next_spike[index] = modified_spike_times[1]
+        end
+    
+        interspike_interval = next_spike .- most_recent_spike
+        firing_rate = 1 ./ interspike_interval
+    
+        firing_rate = firing_rate[1:end-1]
+    
+        return firing_rate
+    end
+
     function hodgkin_huxley_rhs(u, p, time)
-        (current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂) = p
+        (current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, current_modulating, interval_modulating) = p
 
-        (voltage, n_gate, m_gate, h_gate) = u
+        (voltage, n_gate, m_gate, h_gate, M_gate, H_gate) = u
 
-        current_injected = current_injected₀ + current_injected₁ * (time >= time₁) * (time <= time₁ + duration₁) + current_injected₂ * (time >= time₂) * (time <= time₂ + duration₂)
+        current_injected_base = current_injected₀ + current_injected₁ * (time >= time₁) * (time <= time₁ + duration₁) + current_injected₂ * (time >= time₂) * (time <= time₂ + duration₂)
+
+        current_injected = current_injected_base + current_modulating * sin(2 * pi * time / interval_modulating)
 
         voltage_threshold = -40
 
@@ -111,15 +167,53 @@ module HodgkinHuxley
         τn = 1 / (αn + βn)
         n_prime = (n∞ - n_gate) / τn
 
-        voltage_prime = 1 / Cm * (Gna * m_gate^3 * h_gate * (Ena - voltage) + Gk * n_gate^4 * (Ek - voltage) + Gl *(El - voltage) + current_injected)
+        αM = exp(-(1 / 6.2) * (voltage + 57))
+        βM = exp(-(1 / 16.7) * (voltage + 132))
+        γM = exp((1 / 18.2) * (voltage + 16.8))
+        τM = 1 / (βM + γM) + 0.612
+        M∞ = 1 / (1 + αM)
+        M_prime = (M∞ - M_gate) / τM
 
-        u_prime = [voltage_prime, n_prime, m_prime, h_prime]
+        voltage_threshold = -80
+        αH = 1 + exp((1 / 4) * (voltage + 81))
+        βH = exp((1 / 66.6) * (voltage + 467))
+        γH = exp(-(1 / 10.5) * (voltage + 22))
+        τH = βH * (voltage < voltage_threshold) + (γH + 28) * (voltage >= voltage_threshold)
+        H∞ = 1 / (1 + αH)
+        H_prime = (H∞ - H_gate) / τH
+
+        voltage_prime = 1 / Cm * (Gna * m_gate^3 * h_gate * (Ena - voltage) + Gk * n_gate^4 * (Ek - voltage) + Gl *(El - voltage) + GCaT * M_gate ^ 2 * H_gate * (voltage - ECa) + current_injected)
+
+        u_prime = [voltage_prime, n_prime, m_prime, h_prime, M_prime, H_prime]
 
         return u_prime
     end
 
-    function solve_hodgkin_huxley(;method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
-        return solve_hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
+    function solve_hodgkin_huxley(;method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, current_modulating, interval_modulating, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
+        return solve_hodgkin_huxley(method, time_span, current_injected₀, time₁, duration₁, current_injected₁, time₂, duration₂, current_injected₂, current_modulating, interval_modulating, relative_tolerance, absolute_tolerance, show_plot::Bool, save_figure::Union{Bool, AbstractString})
     end
 
 end
+
+using .HodgkinHuxley
+
+
+using OrdinaryDiffEq
+
+tst = solve_hodgkin_huxley(
+        method = RadauIIA5(),
+        time_span = (0.0, 150.0),
+        current_injected₀ = 0.06,
+        time₁ = 50.0,
+        duration₁ = 100.0,
+        current_injected₁ = 0.0,
+        time₂ = 20.0,
+        duration₂ = 500.0,
+        current_injected₂ = 0.0,
+        current_modulating = 0.0,
+        interval_modulating = 1.0,
+        relative_tolerance = 1e-11,
+        absolute_tolerance = 1e-11,
+        show_plot = true,
+        save_figure = false # "./pset2/output/pset_2_prob_1c_" * string(index)
+    )

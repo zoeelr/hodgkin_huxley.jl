@@ -1,3 +1,4 @@
 # ignore output files
 /output/*
 pset*/
+.DS_Store

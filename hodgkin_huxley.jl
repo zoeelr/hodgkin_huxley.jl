@@ -42,21 +42,33 @@ module HodgkinHuxley
         current_K = Gk .* n_gate .^4 .* (Ek .- voltage);
         current_l = Gl .* (El .- voltage);
 
+
+        firing_rate = calculate_firing_rate(time, spike_times)
+
+        if !(isnothing(firing_rate))
+            firing_rate_to_plot, time_to_plot = prepare_firing_rate_to_plot(firing_rate, time, spike_times)
+        end
+
         if show_plot || (save_figure != false)
             plot_voltage_v_time = plot(solution, plotdensity=10000, idxs=[1], title="Voltage", label="voltage", xlabel="time (ms)", ylabel="(mV)"; dpi=600)
             plot_gates_v_time = plot(solution, plotdensity=10000, idxs=[2, 3, 4], title="Current gating variables", label=["n" "m" "h"], xlabel="time (ms)"; dpi=600)
             plot_current_v_time = plot(time, plotdensity=10000, [current_Na, current_K, current_l], title="Currents", label=["Na" "K" "leak"], xlabel="time (ms)", ylabel="(mA)"; dpi=600)
-
-            full_plot = plot(plot_voltage_v_time, plot_gates_v_time, plot_current_v_time, layout=(3, 1); dpi = 600)
-
+            if !(isnothing(firing_rate))
+                plot_spike_periods = plot(time_to_plot, plotdensity=10000, firing_rate_to_plot, title="Spike firing rate", label="firing rate", xlabel="time (ms)", dpi=600)
+                full_plot = plot(plot_voltage_v_time, plot_gates_v_time, plot_current_v_time, plot_spike_periods, layout=(2, 2); dpi = 600)
+            else
+                full_plot = plot(plot_voltage_v_time, plot_gates_v_time, plot_current_v_time, layout=(3, 1); dpi = 600)
+            end
 
             if (save_figure != false)
                 savefig(plot_voltage_v_time, save_figure*"_volt")
                 savefig(plot_gates_v_time, save_figure*"_vars")
                 savefig(plot_current_v_time, save_figure*"_currs")
+                if !(isnothing(firing_rate))
+                savefig(plot_spike_periods, save_figure*"_frrt")
+                end
                 savefig(full_plot, save_figure*"_full")
             end
-
             if show_plot
                 display(full_plot)
             end
@@ -83,6 +95,75 @@ module HodgkinHuxley
         periods = spike_times[2:end] .- spike_times[1:end-1]
     
         return spike_times, periods
+    end
+
+
+    function calculate_periods(time, voltage)
+        mask_voltage_sign_changes = (voltage[1:end-1] .* voltage[2:end]) .< 0
+    
+        mask_voltage_negative = voltage[1:end-1] .< 0
+    
+        mask_spikes = (mask_voltage_sign_changes .== 1) .& (mask_voltage_negative .== 1)
+    
+        spike_times = (time[1:end-1])[mask_spikes]
+    
+        if length(mask_spikes) < 2
+            @warn "Less than 2 spikes, no periods calculated"
+            return spike_times, []
+        end
+    
+        periods = spike_times[2:end] .- spike_times[1:end-1]
+    
+        return spike_times, periods
+    end
+
+    function calculate_firing_rate(time, spike_times)
+        if length(spike_times) < 2
+            @warn "Less than 2 spikes, no periods calculated"
+            return nothing
+        end
+        modified_spike_times = copy(spike_times)
+
+        append!(modified_spike_times, time[end] + 1)
+    
+        next_spike = zeros((length(spike_times), length(time)))
+        most_recent_spike = zeros((length(spike_times), length(time)))
+        for spike_index in eachindex(spike_times)
+            most_recent_spike[spike_index, :] = modified_spike_times[spike_index] .* ( (time .>= modified_spike_times[spike_index]) .&& (time .< modified_spike_times[spike_index + 1]) )
+        end
+        extrapolated_next_spike = 2 * spike_times[end] - spike_times[end - 1]
+        modified_spike_times[end] = extrapolated_next_spike
+        for spike_index in eachindex(spike_times)
+            next_spike[spike_index, :] = modified_spike_times[spike_index + 1] .* ( (time .>= modified_spike_times[spike_index]) .&& (time .< modified_spike_times[spike_index + 1]) )
+        end
+    
+        most_recent_spike[end] = most_recent_spike[end - 1]
+        next_spike[end] = extrapolated_next_spike
+    
+        most_recent_spike = sum(most_recent_spike, dims=1)
+        next_spike = sum(next_spike, dims=1)
+    
+        for index in eachindex(next_spike)
+            if next_spike[index] != 0
+                break
+            end
+            next_spike[index] = modified_spike_times[1]
+        end
+    
+        interspike_interval = next_spike .- most_recent_spike
+        firing_rate = 1 ./ interspike_interval
+    
+        firing_rate = firing_rate[1:end-1]
+    
+        return firing_rate
+    end
+
+    function prepare_firing_rate_to_plot(firing_rate, time, spike_times)
+        time_to_plot = copy(time)[1:end - 1]
+        firing_rate_to_plot = copy(firing_rate)
+        firing_rate_to_plot = firing_rate_to_plot[time_to_plot .> spike_times[1]]
+        time_to_plot = time_to_plot[time_to_plot .> spike_times[1]]
+        return firing_rate_to_plot, time_to_plot
     end
 
     function hodgkin_huxley_rhs(u, p, time)
